@@ -1,0 +1,544 @@
+/**
+ *  FIBARO Roller Shutter 3
+ *
+ *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
+ *  in compliance with the License. You may obtain a copy of the License at:
+ *
+ *	  http://www.apache.org/licenses/LICENSE-2.0
+ *
+ *  Unless required by applicable law or agreed to in writing, software distributed under the License is distributed
+ *  on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License
+ *  for the specific language governing permissions and limitations under the License.
+ *
+ */
+metadata {
+    definition (name: "Fibaro FGR-223 V0.1", namespace: "Fibaro", author: "JBranquinho") {
+        capability "Window Shade"
+        capability "Energy Meter"
+        capability "Power Meter"
+        capability "Configuration"
+
+        command "reset"
+        command "refresh"
+        command "calibrate"
+        command "stop"
+        command "setPosition"
+        command "setSlats"
+
+        attribute "position", "number"
+        attribute "slats", "number"
+        attribute "power", "number"
+        attribute "timeUpMov", "number"
+        attribute "timeDownMov", "number"
+        // attribute "TDelay_GetPos", "number" //Time Delay to get Current Position
+
+        fingerprint mfr: "010F", prod: "0303"
+        fingerprint deviceId: "0x1106", inClusters:"0x5E,0x55,0x98,0x9F,0x56,0x6C,0x22,0x26,0x85,0x8E,0x59,0x86,0x72,0x5A,0x73,0x32,0x70,0x71,0x75,0x60,0x5B,0x7A"
+    }
+
+    tiles (scale: 2) {
+        multiAttributeTile(name:"windowShade", type: "generic", width: 3, height: 4, canChangeIcon: false){
+            tileAttribute ("device.windowShade", key: "PRIMARY_CONTROL") {
+                attributeState "unknown", label: 'Unknown', action: "calibrate", icon: "https://s3-eu-west-1.amazonaws.com/fibaro-smartthings/rollerShuter/Roleta50.png", backgroundColor: "#ffffff"
+                attributeState "closed", label: 'Closed', action: "open", icon: "https://s3-eu-west-1.amazonaws.com/fibaro-smartthings/rollerShuter/Roleta100.png", backgroundColor: "#ffffff", nextState:"opening"
+                attributeState "open", label: 'Open', action: "close", icon: "https://s3-eu-west-1.amazonaws.com/fibaro-smartthings/rollerShuter/Roleta0.png", backgroundColor: "#00a0dc", nextState:"closing"
+                attributeState "opening", label: 'Opening', action: "stop", icon: "https://s3-eu-west-1.amazonaws.com/fibaro-smartthings/rollerShuter/Roleta50.png", backgroundColor: "#99d9f1", nextState:"partially open"
+                attributeState "closing", label: 'Closing', action: "stop", icon: "https://s3-eu-west-1.amazonaws.com/fibaro-smartthings/rollerShuter/Roleta50.png", backgroundColor: "#99d9f1", nextState:"partially open"
+                attributeState "partially open", label: 'Partially Open', action: "open", icon: "https://s3-eu-west-1.amazonaws.com/fibaro-smartthings/rollerShuter/Roleta50.png", backgroundColor: "#00a0dc", nextState:"opening"            
+            }
+            tileAttribute("device.multiStatus", key:"SECONDARY_CONTROL") {
+                attributeState("combinedMeter", label:'${currentValue}')
+            }
+            tileAttribute ("device.position", key: "SLIDER_CONTROL") {
+                attributeState "position", action:"setPosition"
+            }
+        }
+        valueTile("power", "device.power", decoration: "flat", width: 2, height: 2) {
+            state "power", label:'${currentValue}\nW', action:"refresh"
+        }
+        valueTile("energy", "device.energy", decoration: "flat", width: 2, height: 2) {
+            state "energy", label:'${currentValue}\nkWh', action:"refresh"
+        }
+        valueTile("reset", "device.energy", decoration: "flat", width: 2, height: 2) {
+            state "reset", label:'reset\nkWh', action:"reset"
+        }
+        valueTile("calibrate", "device.calibrate", decoration: "flat", width: 2, height: 1) {
+            state "calibrate", label:'Calibrate', action:"calibrate"
+        }
+        valueTile("slatsText", "device.slats", decoration: "flat", width: 2, height: 1) {
+            state "slats", label:'Slats:'
+        }
+        controlTile("slats", "device.slats", "slider", range:"(0..100)", height: 1, width: 2) {
+            state "slats", label:'slats', action:"setSlats"
+        }
+    }
+
+    preferences {
+        input (
+                title: "Fibaro Roller Shutter 3 ZW5 manual",
+                description: "Tap to view the manual.",
+                image: "http://manuals.fibaro.com/wp-content/uploads/2017/02/d2_icon.png",
+                url: "https://manuals.fibaro.com/content/manuals/en/FGR-223/FGR-223-EN-T-v1.0.pdf",
+                type: "href",
+                element: "href"
+        )
+
+        parameterMap().each {
+            input (
+                    title: "${it.num}. ${it.title}",
+                    description: it.descr,
+                    type: "paragraph",
+                    element: "paragraph"
+            )
+
+            input (
+                    name: it.key,
+                    title: null,
+                    type: it.type,
+                    options: it.options,
+                    range: (it.min != null && it.max != null) ? "${it.min}..${it.max}" : null,
+                    defaultValue: it.def,
+                    required: false
+            )
+        }
+
+        input ( name: "logging", title: "Logging", type: "boolean", required: false )
+    }
+}
+
+def open() {
+    def cmds = []
+    def TDelayGetPos = 0
+    TDelayGetPos = (timeUpMov.intValue()+100)*10
+    logging("${device.displayName} - Time Delay Value: ${TDelayGetPos} ms","info")
+    cmds << zwave.basicV1.basicSet(value: 99)
+    cmds << zwave.switchMultilevelV3.switchMultilevelGet()
+    encapSequence(cmds,TDelayGetPos)
+}
+
+def close() {
+    def cmds = []
+    def TDelayGetPos = 0
+    TDelayGetPos = (timeDownMov.intValue()+100)*10
+    logging("${device.displayName} - Time Delay Value: ${TDelayGetPos} ms","info")
+    cmds << zwave.basicV1.basicSet(value: 0)
+    cmds << zwave.switchMultilevelV3.switchMultilevelGet()
+    encapSequence(cmds,27000)
+}
+
+def stop() {
+    def cmds = []
+    cmds << zwave.switchMultilevelV3.switchMultilevelStopLevelChange()
+    cmds << zwave.switchMultilevelV3.switchMultilevelGet()
+    encapSequence(cmds,2000)
+}
+
+def calibrate() {
+	encap(zwave.configurationV2.configurationSet(configurationValue: intToParam(2, 1), parameterNumber: 150, size: 1))
+}
+
+def setPosition(Integer value) {
+    def cmds = []
+    def TDelayGetPos = 0
+    logging("${device.displayName} - Executing setLevel( $value )","info")
+	if (device.currentValue("position") > value) {
+    	TDelayGetPos = (timeDownMov.intValue()+100)*10
+        sendEvent(name: "windowShade", value: "closing")
+    } else if (device.currentValue("position") < value) {
+	    TDelayGetPos = (timeUpMov.intValue()+100)*10
+        sendEvent(name: "windowShade", value: "opening")
+    }
+    logging("${device.displayName} - Time Delay Value: ${TDelayGetPos} ms","info")
+    cmds << zwave.basicV1.basicSet(value: (value > 0) ? value-1 : 0)
+    cmds << zwave.switchMultilevelV3.switchMultilevelGet()
+    encapSequence(cmds,TDelayGetPos)
+}
+
+def setSlats(Integer value) {
+    refresh()
+}
+
+def reset() {
+    logging("${device.displayName} - Executing reset()","info")
+    def cmds = []
+    cmds << zwave.meterV3.meterReset()
+    cmds << zwave.meterV3.meterGet(scale: 0)
+    cmds << zwave.meterV3.meterGet(scale: 2)
+    encapSequence(cmds,1500)
+}
+
+def refresh() {
+    logging("${device.displayName} - Executing refresh()","info")
+    def cmds = []
+    cmds << zwave.basicV1.basicGet()
+    cmds << zwave.switchMultilevelV3.switchMultilevelGet()
+	cmds << zwave.meterV3.meterGet(scale: 0)
+    cmds << zwave.meterV3.meterGet(scale: 2)
+    encapSequence(cmds,1500)
+}
+
+def setLevel(String value) {	//This Function is only used for routines
+    def cmds = []
+    def TDelayGetPos = 0
+    def val1 = 0
+    val1 = value.toInteger()
+    logging("${device.displayName} - Executing setLevel( $val1 )","info")
+	if (device.currentValue("position") > val1) {
+    	TDelayGetPos = (timeDownMov.intValue()+100)*10
+    } else if (device.currentValue("position") <= val1) {
+	    TDelayGetPos = (timeUpMov.intValue()+100)*10
+    }    
+    logging("${device.displayName} - Time Delay Value: ${TDelayGetPos} ms","info")
+	cmds << zwave.basicV1.basicSet(value: (val1 > 0) ? val1-1 : 0)
+    cmds << zwave.switchMultilevelV3.switchMultilevelGet()
+    encapSequence(cmds,TDelayGetPos)
+}
+
+def updated() {
+    if ( state.lastUpdated && (now() - state.lastUpdated) < 500 ) return
+    def cmds = []
+    logging("${device.displayName} - Executing updated()","info")
+    runIn(3,"syncStart")
+    state.lastUpdated = now()
+}
+
+private syncStart() {
+    boolean syncNeeded = false
+    parameterMap().each {
+        if(settings."$it.key" != null) {
+            if (state."$it.key" == null) { state."$it.key" = [value: null, state: "synced"] }
+            if (state."$it.key".value != settings."$it.key" as Integer || state."$it.key".state in ["notSynced","inProgress"]) {
+                state."$it.key".value = settings."$it.key" as Integer
+                state."$it.key".state = "notSynced"
+                syncNeeded = true
+            }
+        }
+    }
+    if ( syncNeeded ) {
+        logging("${device.displayName} - starting sync.", "info")
+        multiStatusEvent("Sync in progress.", true, true)
+        syncNext()
+    }
+}
+
+private syncNext() {
+    logging("${device.displayName} - Executing syncNext()","info")
+    def cmds = []
+    for ( param in parameterMap() ) {
+        if ( state."$param.key"?.value != null && state."$param.key"?.state in ["notSynced","inProgress"] ) {
+            multiStatusEvent("Sync in progress. (param: ${param.num})", true)
+            state."$param.key"?.state = "inProgress"
+            cmds << response(encap(zwave.configurationV2.configurationSet(configurationValue: intToParam(state."$param.key".value, param.size), parameterNumber: param.num, size: param.size)))
+            cmds << response(encap(zwave.configurationV2.configurationGet(parameterNumber: param.num)))
+            break
+        }
+    }
+    if (cmds) {
+        runIn(10, "syncCheck")
+        sendHubCommand(cmds,1000)
+    } else {
+        runIn(1, "syncCheck")
+    }
+}
+
+private syncCheck() {
+    logging("${device.displayName} - Executing syncCheck()","info")
+    def failed = []
+    def incorrect = []
+    def notSynced = []
+    parameterMap().each {
+        if (state."$it.key"?.state == "incorrect" ) {
+            incorrect << it
+        } else if ( state."$it.key"?.state == "failed" ) {
+            failed << it
+        } else if ( state."$it.key"?.state in ["inProgress","notSynced"] ) {
+            notSynced << it
+        }
+    }
+    if (failed) {
+        logging("${device.displayName} - Sync failed! Check parameter: ${failed[0].num}","info")
+        sendEvent(name: "syncStatus", value: "failed")
+        multiStatusEvent("Sync failed! Check parameter: ${failed[0].num}", true, true)
+    } else if (incorrect) {
+        logging("${device.displayName} - Sync mismatch! Check parameter: ${incorrect[0].num}","info")
+        sendEvent(name: "syncStatus", value: "incomplete")
+        multiStatusEvent("Sync mismatch! Check parameter: ${incorrect[0].num}", true, true)
+    } else if (notSynced) {
+        logging("${device.displayName} - Sync incomplete!","info")
+        sendEvent(name: "syncStatus", value: "incomplete")
+        multiStatusEvent("Sync incomplete! Open settings and tap Done to try again.", true, true)
+    } else {
+        logging("${device.displayName} - Sync Complete","info")
+        sendEvent(name: "syncStatus", value: "synced")
+        multiStatusEvent("Sync OK.", true, true)
+    }
+}
+
+private multiStatusEvent(String statusValue, boolean force = false, boolean display = false) {
+    if (!device.currentValue("multiStatus")?.contains("Sync") || device.currentValue("multiStatus") == "Sync OK." || force) {
+        sendEvent(name: "multiStatus", value: statusValue, descriptionText: statusValue, displayed: display)
+    }
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.configurationv2.ConfigurationReport cmd) {
+    def paramKey = parameterMap().find( {it.num == cmd.parameterNumber } ).key
+    switch (cmd.parameterNumber) {
+        case 156:
+            sendEvent([name: "timeUpMov", value: cmd.scaledConfigurationValue])
+            break
+        case 157:
+            sendEvent([name: "timeDownMov", value: cmd.scaledConfigurationValue])
+            break
+    }
+    logging("${device.displayName} - Parameter ${paramKey} value is ${cmd.scaledConfigurationValue} expected " + state."$paramKey".value, "info")
+    state."$paramKey".state = (state."$paramKey".value == cmd.scaledConfigurationValue) ? "synced" : "incorrect"
+    syncNext()
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.applicationstatusv1.ApplicationRejectedRequest cmd) {
+    logging("${device.displayName} - rejected request!","warn")
+    for ( param in parameterMap() ) {
+        if ( state."$param.key"?.state == "inProgress" ) {
+            state."$param.key"?.state = "failed"
+            break
+        }
+    }
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.basicv1.BasicReport cmd) {
+    logging("${device.displayName} - BasicReport received, ignored, value: ${cmd.value}","info")
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.switchmultilevelv3.SwitchMultilevelStopLevelChange cmd) {
+    logging("${device.displayName} - SwitchMultilevelStopLevelChange received, ignoring {$cmd} ","info")
+    //ignore
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.switchmultilevelv3.SwitchMultilevelReport cmd) {
+    logging("${device.displayName} - SwitchMultilevelReport received, value: ${cmd.value}","info")
+	switch (cmd.value) {
+        case 0:
+            sendEvent(name: "windowShade", value: "closed")
+            break
+        case 99:
+            sendEvent(name: "windowShade", value: "open")
+            break
+        default:
+            sendEvent(name: "windowShade", value: "partially open")
+            break
+    }    
+    sendEvent(name: "position", value: (cmd.value > 0) ? cmd.value+1 : 0)
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.meterv3.MeterReport cmd) {
+    logging("${device.displayName} - MeterReport received, value: ${cmd.scaledMeterValue} scale: ${cmd.scale} ep: $ep","info")
+    switch (cmd.scale) {
+        case 0:
+            sendEvent([name: "energy", value: cmd.scaledMeterValue, unit: "kWh"])
+            break
+        case 2:
+            sendEvent([name: "power", value: cmd.scaledMeterValue, unit: "W"])
+            break
+    }
+    multiStatusEvent("${(device.currentValue("power") ?: "0.0")} W | ${(device.currentValue("energy") ?: "0.00")} kWh")
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.centralscenev1.CentralSceneNotification cmd) {
+    logging("${device.displayName} - CentralSceneNotification received, sceneNumber: ${cmd.sceneNumber} keyAttributes: ${cmd.keyAttributes}","info")
+    log.info cmd
+    def String action
+    def Integer button
+    switch (cmd.sceneNumber as Integer) {
+		//For later use
+    }
+    log.info "button $button $action"
+    sendEvent(name: "button", value: action, data: [buttonNumber: button], isStateChange: true)
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.notificationv3.NotificationReport cmd) {
+    logging("${device.displayName} - NotificationReport received for ${cmd.event}, parameter value: ${cmd.eventParameter[0]}", "info")
+	//For later use
+}
+
+def parse(String description) {
+    def result = []
+    logging("${device.displayName} - Parsing: ${description}")
+    if (description.startsWith("Err 106")) {
+        result = createEvent(
+                descriptionText: "Failed to complete the network security key exchange. If you are unable to receive data from it, you must remove it from your network and add it again.",
+                eventType: "ALERT",
+                name: "secureInclusion",
+                value: "failed",
+                displayed: true,
+        )
+    } else if (description == "updated") {
+        return null
+    } else {
+        def cmd = zwave.parse(description, cmdVersions())
+        if (cmd) {
+            logging("${device.displayName} - Parsed: ${cmd}")
+            zwaveEvent(cmd)
+        }
+    }
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.securityv1.SecurityMessageEncapsulation cmd) {
+    def encapsulatedCommand = cmd.encapsulatedCommand(cmdVersions())
+    if (encapsulatedCommand) {
+        logging("${device.displayName} - Parsed SecurityMessageEncapsulation into: ${encapsulatedCommand}")
+        zwaveEvent(encapsulatedCommand)
+    } else {
+        log.warn "Unable to extract Secure command from $cmd"
+    }
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.crc16encapv1.Crc16Encap cmd) {
+    def version = cmdVersions()[cmd.commandClass as Integer]
+    def ccObj = version ? zwave.commandClass(cmd.commandClass, version) : zwave.commandClass(cmd.commandClass)
+    def encapsulatedCommand = ccObj?.command(cmd.command)?.parse(cmd.data)
+    if (encapsulatedCommand) {
+        logging("${device.displayName} - Parsed Crc16Encap into: ${encapsulatedCommand}")
+        zwaveEvent(encapsulatedCommand)
+    } else {
+        log.warn "Unable to extract CRC16 command from $cmd"
+    }
+}
+
+def zwaveEvent(physicalgraph.zwave.commands.multichannelv3.MultiChannelCmdEncap cmd) {
+    def encapsulatedCommand = cmd.encapsulatedCommand(cmdVersions())
+    if (encapsulatedCommand) {
+        logging("${device.displayName} - Parsed MultiChannelCmdEncap ${encapsulatedCommand}")
+        zwaveEvent(encapsulatedCommand, cmd.sourceEndPoint as Integer)
+    } else {
+        log.warn "Unable to extract MultiChannel command from $cmd"
+    }
+}
+
+private logging(text, type = "debug") {
+    if (settings.logging == "true") {
+        log."$type" text
+    }
+}
+
+private secEncap(physicalgraph.zwave.Command cmd) {
+    logging("${device.displayName} - encapsulating command using Secure Encapsulation, command: $cmd","info")
+    zwave.securityV1.securityMessageEncapsulation().encapsulate(cmd).format()
+}
+
+private crcEncap(physicalgraph.zwave.Command cmd) {
+    logging("${device.displayName} - encapsulating command using CRC16 Encapsulation, command: $cmd","info")
+    zwave.crc16EncapV1.crc16Encap().encapsulate(cmd).format()
+}
+
+private multiEncap(physicalgraph.zwave.Command cmd, Integer ep) {
+    logging("${device.displayName} - encapsulating command using MultiChannel Encapsulation, ep: $ep command: $cmd","info")
+    zwave.multiChannelV3.multiChannelCmdEncap(destinationEndPoint:ep).encapsulate(cmd)
+}
+
+private encap(physicalgraph.zwave.Command cmd, Integer ep) {
+    encap(multiEncap(cmd, ep))
+}
+
+private encap(List encapList) {
+    encap(encapList[0], encapList[1])
+}
+
+private encap(Map encapMap) {
+    encap(encapMap.cmd, encapMap.ep)
+}
+
+private encap(physicalgraph.zwave.Command cmd) {
+    if (zwaveInfo.zw.contains("s")) {
+        secEncap(cmd)
+    } else if (zwaveInfo.cc.contains("56")){
+        crcEncap(cmd)
+    } else {
+        logging("${device.displayName} - no encapsulation supported for command: $cmd","info")
+        cmd.format()
+    }
+}
+
+private encapSequence(cmds, Integer delay=250) {
+    delayBetween(cmds.collect{ encap(it) }, delay)
+}
+
+private encapSequence(cmds, Integer delay, Integer ep) {
+    delayBetween(cmds.collect{ encap(it, ep) }, delay)
+}
+
+private List intToParam(Long value, Integer size = 1) {
+    def result = []
+    size.times {
+        result = result.plus(0, (value & 0xFF) as Short)
+        value = (value >> 8)
+    }
+    return result
+}
+
+private Map cmdVersions() {
+    //[0x5E: 1, 0x86: 1, 0x72: 2, 0x59: 1, 0x73: 1, 0x22: 1, 0x31: 5, 0x32: 3, 0x71: 3, 0x56: 1, 0x98: 1, 0x7A: 2, 0x20: 1, 0x5A: 1, 0x85: 2, 0x26: 3, 0x8E: 2, 0x60: 3, 0x70: 2, 0x75: 2, 0x27: 1]
+    [0x5E: 1, 0x26: 3, 0x85: 2, 0x8E: 2, 0x59: 1, 0x55: 1, 0x86: 1, 0x72: 2, 0x5A: 1, 0x73: 1, 0x98: 1, 0x32: 3, 0x70: 2, 0x56: 1, 0x71: 3, 0x75: 2, 0x60: 3, 0x5B: 1, 0x7A: 2, 0x22: 1, 0x20: 1]
+}
+
+private parameterMap() {[
+        [key: "switchType", num: 20, size: 1, type: "enum", options: [
+                0: "0 - Momentary Switches",
+                1: "1 - Toggle Switches",
+                2: "2 - Single Momentary Switch"
+        ], def: "2", title: "Switch Types",
+         descr: ""],
+        [key: "inputsOrientation", num: 24, size: 1, type: "enum", options: [
+                0: "0 - S1 - Channel 1; S2 - Channel 2",
+                1: "1 - S1 - Channel 2; S2 - Channel 1"
+        ], def: "0", title: "Inputs Orientation",
+         descr: ""],
+        [key: "outputsOrientation", num: 25, size: 1, type: "enum", options: [
+                0: "0 - Q1 - Channel 1; Q2 - Channel 2",
+                1: "1 - Q1 - Channel 2; Q2 - Channel 1"
+        ], def: "0", title: "Outputs Orientation",
+         descr: ""],
+        [key: "powerMeasure", num: 60, size: 1, type: "enum", options: [
+                0: "0 - Inactive",
+                1: "1 - Active"
+        ], def: "0", title: "Measure Power Consumed by Device",
+         descr: ""],
+        [key: "powerReportsonChange", num: 61, size: 2, type: "number", def: 15, min: 0, max: 500, title: "Power Reports on Change",
+         descr: "0 - Reports Disabled; 1-500 (1-500%) Change in power"],
+        [key: "powerReportsPeriodic", num: 62, size: 2, type: "number", def: 3600, min: 0, max: 32400, title: "Periodic Power Reports",
+         descr: "0 - Reports Disabled; 30-32400 (30-32400s) Report Interval"],
+        [key: "energyReportsonChange", num: 65, size: 2, type: "number", def: 10, min: 0, max: 500, title: "Energy Reports on Change",
+         descr: "0 - Reports Disabled; 1-500 (0.01-5kWh) Change in Energy"],
+        [key: "energyReportsPeriodic", num: 66, size: 2, type: "number", def: 3600, min: 0, max: 32400, title: "Periodic Energy Reports",
+         descr: "0 - Reports Disabled; 30-32400 (30-32400s) Report Interval"],
+        [key: "forceCalibration", num: 150, size: 1, type: "enum", options: [
+                0: "0 - Device is not calibrated",
+                1: "1 - Device is calibrated",
+                2: "2 - Force Device calibration"
+        ], def: "0", title: "Force Calibration",
+         descr: ""],
+        [key: "operatingMode", num: 151, size: 1, type: "enum", options: [
+                1: "1 - Roller Blind Mode, with positioning",
+                2: "2 - Venetian Blind Mode, with positioning",
+                3: "3 - Gate Mode, without positioning",
+                4: "4 - Gate Mode, with positioning",
+				5: "5 - Roller Blind Mode, with buil-in driver",
+				6: "6 - Roller Blind Mode, with buil-in driver (impulse)"
+        ], def: "1", title: "Roller Shutter operating modes",
+         descr: ""],
+        [key: "vBlindTimeFullSlats", num: 152, size: 4, type: "number", def: 150, min: 0, max: 90000, title: "Venetian blind - time of full turn of the slats",
+         descr: "0-90000 -> 0 - 900s Time of turn"],
+        [key: "setSlatsPrevPos", num: 153, size: 1, type: "enum", options: [
+                0: "0 - Slats return to previously set position only in case of the main controller operation",
+				1: "1 - Slats return to previously set position in case of the main controller operation, momentary switch operation, or when the limit switch is reached",
+				2: "2 - Slats return to previously set position in case of the main controller operation, momentary switch operation, when the limit switch is reached or after receiving the Switch Multilevel Stop control frame"
+        ], def: "1", title: "Set slats back to previous position",
+         descr: ""],		 
+        [key: "TDelayafterEndSwitch", num: 154, size: 2, type: "number", def: 10, min: 0, max: 600, title: "Delay motor stop after reaching end switch",
+         descr: "0-600 -> 0 - 60s Time"],		 
+        [key: "motorOpDetect", num: 155, size: 2, type: "number", def: 10, min: 0, max: 255, title: "Motor operation detection",
+         descr: "0-Reaching a limit switch will not be detected; 1-255W Report Interval"],	
+        [key: "timeUpMov", num: 156, size: 4, type: "number", def: 6000, min: 1, max: 90000, title: "Time of up movement",
+         descr: "1-90000 (0.01 - 900.00s) Movement Time"],
+        [key: "timeDownMov", num: 157, size: 4, type: "number", def: 6000, min: 1, max: 90000, title: "Time of down movement",
+         descr: "1-90000 (0.01 - 900.00s) Movement Time"]
+]}
